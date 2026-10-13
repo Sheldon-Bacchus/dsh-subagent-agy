@@ -56,14 +56,16 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { defineTool, type JsonValue, type ToolRunContext } from '@deepseek-ai/dsh-tools'
+import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools'
+import type {} from '@deepseek-ai/dsh-jobs'
+
+type JsonValue = string | number | boolean | null | { [key: string]: JsonValue } | JsonValue[]
 import {
   NO_START_CAPABILITIES,
   assertPositiveFinite,
-  resolveChildCwd,
+  assertUsableCwd,
   settleRunResult,
   subprocessRunHandle,
-  validateConfiguredCwd,
   type ResolvedSubagentStartRequest,
   type SubagentProvider,
   type SubagentResult,
@@ -74,9 +76,21 @@ import { scrubbedParentEnv, type SubprocessHandle } from '@deepseek-ai/dsh-subpr
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import { dirname, isAbsolute, join } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+
+function validateConfiguredCwd(prefix: string, cwd: string | undefined): string | undefined {
+  if (cwd === undefined) return undefined
+  if (cwd === '') throw new Error(`${prefix}: config cwd must not be empty — omit the key to inherit the parent session cwd`)
+  return assertUsableCwd(prefix, 'config cwd', resolve(cwd))
+}
+
+function resolveChildCwd(prefix: string, configured: string | undefined, parentCwd: string | undefined): string {
+  if (configured !== undefined) return configured
+  if (parentCwd === undefined) throw new Error(`${prefix}: no working directory for the child — configure \`cwd\` or delegate from a parent session that has one`)
+  return assertUsableCwd(prefix, 'parent session cwd', parentCwd)
+}
 
 export const name = '@dsh-external/dsh-subagent-antigravity'
 export const inject = ['subagents', 'subprocess', 'tools']
@@ -125,7 +139,7 @@ const AVOID_BROWSER_SUFFIX =
 const AVOID_LARGE_READ_SUFFIX =
   '\n\n(Environment note: files larger than 1 MB must NOT be read with your file-read tool — it fails above 4 MB, which large files like single-file components with embedded assets easily exceed. Inspect large files with grep, sed, head, tail, or python via run_command instead: first probe structure with head/grep, then extract only the slices you need. Never read a file whole when it is larger than 1 MB.)'
 
-export const Config = z.object({
+export const Config: Schemastery<Config> = z.object({
   /** Registry name on `ctx.subagents`. */
   providerName: z.string().default('antigravity'),
   /** New-task tool name. */
